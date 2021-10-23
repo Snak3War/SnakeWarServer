@@ -31,6 +31,8 @@
 |--------------------|
 ```
 
+- Event Heartbeat
+
 - Event Start
 
 - Event Pause
