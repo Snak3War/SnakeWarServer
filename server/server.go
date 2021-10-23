@@ -29,6 +29,7 @@ type Server struct {
 	tick       uint32
 	stopSig    chan struct{}
 	onlineMask uint64
+	paused     bool
 }
 
 const (
@@ -71,6 +72,7 @@ func (s *Server) Stop() {
 func (s *Server) Run() {
 	var err error
 	s.tick = 0
+	s.paused = false
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -97,6 +99,11 @@ func (s *Server) Run() {
 					break
 				}
 				s.handlers[i] = *newConnectionHandler(s, i, conn, seed)
+				if err = s.handlers[i].Handshake(); err != nil {
+					s.handlers[i].Stop()
+					log.Printf("player %d handshake fail %v\n", i, err)
+					continue
+				}
 				go s.handlers[i].Run(ctx, s.events)
 				defer s.handlers[i].Stop()
 				s.onlineMask |= 1 << i
@@ -120,8 +127,10 @@ func (s *Server) Run() {
 			if s.onlineMask == 0 {
 				return
 			}
-			s.tick++
 			s.notifyNextTick()
+			if !s.paused {
+				s.tick++
+			}
 		case <-s.stopSig:
 			return
 		}
@@ -140,7 +149,11 @@ Loop:
 		var ed eventWithData
 		select {
 		case ed = <-s.events:
+			if ed.Event.Type == proto.EventTypePause {
+				s.paused = !s.paused
+			}
 			pkt.Count++
+			log.Printf("[record] tick=%v %+v\n", s.tick, ed)
 			ed.Event.Tick = s.tick
 			data = append(data, proto.PacketToData(ed.Event)...)
 			data = append(data, ed.Data...)
@@ -148,23 +161,26 @@ Loop:
 			break Loop
 		}
 	}
-	if pkt.Count == 0 {
-		data = append(data, proto.PacketToData(
-			proto.Event{
-				Tick:     s.tick,
-				Type:     proto.EventTypeHeartbeat,
-				DataSize: 0,
-			},
-		)...)
-		pkt.Count++
+	if s.paused && pkt.Count == 0 {
+		return
 	}
+	// if pkt.Count == 0 {
+	// 	data = append(data, proto.PacketToData(
+	// 		proto.Event{
+	// 			Tick:     s.tick,
+	// 			Type:     proto.EventTypeHeartbeat,
+	// 			DataSize: 0,
+	// 		},
+	// 	)...)
+	// 	pkt.Count++
+	// }
 	data = append(proto.PacketToData(pkt), data...)
 	s.Broadcast(-1, data)
 }
 
 func (s *Server) Broadcast(except int, data []byte) {
 	for i, v := range s.handlers {
-		if i != except && v.Online {
+		if i != except && ((s.onlineMask>>i)&1) != 0 {
 			go func(i int) {
 				n, err := s.handlers[i].Send(data)
 				if err != nil || n != len(data) {

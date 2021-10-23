@@ -61,7 +61,7 @@ func (p *Handshake) UnmarshalBinary(data []byte) error {
 	if len(data) < p.Size() {
 		return ErrDataNotEnough
 	}
-	p.Seed = binary.ByteOrder.Uint16(binary.BigEndian, data)
+	p.Seed = binary.LittleEndian.Uint16(data)
 	p.ID = data[2]
 	p.Count = data[3]
 	return nil
@@ -87,7 +87,7 @@ func (p *Event) UnmarshalBinary(data []byte) error {
 	if len(data) < p.Size() {
 		return ErrDataNotEnough
 	}
-	p.Tick = binary.BigEndian.Uint32(data)
+	p.Tick = binary.LittleEndian.Uint32(data)
 	p.Type = data[4]
 	p.DataSize = data[5]
 	return nil
